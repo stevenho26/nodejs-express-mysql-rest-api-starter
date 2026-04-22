@@ -8,6 +8,8 @@
     "lint": "eslint src --ext .js",
     "create-db": "node src/scripts/setup-db.js",
     "verify-db": "node src/scripts/verify-db.js",
+    "setup-mdata-db": "node src/scripts/setup-mdata-db.js",
+    "setup-mdata-db-seed": "node src/scripts/setup-mdata-db.js --seed",
     "dev": "npm start"
   },
   "keywords": [],
