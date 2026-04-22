@@ -1,21 +1,28 @@
 const User = require('../models/user.model');
 const Blog = require('../models/blog.model');
 const logger = require('../config/logger');
+const config = require('../config/config');
 
 const seedDefaultData = async () => {
   try {
+    const shouldSeed = config.seed_default_data || config.node_env === 'development';
+    if (!shouldSeed) {
+      logger.info('Skipping seed data for non-development environment');
+      return;
+    }
+
     const userCount = await User.count();
     if (userCount === 0) {
       const defaultUser = {
         name: 'Default User',
         email: 'default@example.com',
-        password: 'password123',
+        password: config.default_seed_password,
         role: 'user'
       };
       const adminUser = {
         name: 'Admin User',
         email: 'admin@example.com',
-        password: 'password123',
+        password: config.default_seed_password,
         role: 'admin'
       };
       const user = await User.create(defaultUser);

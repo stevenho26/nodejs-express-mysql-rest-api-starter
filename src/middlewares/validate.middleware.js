@@ -10,7 +10,7 @@ const validate = (schema) => (req, res, next) => {
     const errorMessages = error.details.map((details) => details.message.replace(/"/g, ''));
     return next(new ApiError(400, errorMessages));
   }
-  Object.assign(req, value);
+  req.body = value;
   return next();
 };
 

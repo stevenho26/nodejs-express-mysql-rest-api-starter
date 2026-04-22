@@ -24,7 +24,11 @@ const login = async (email, password) => {
         throw new ApiError(401, 'Incorrect email or password');
     }
 
-    const token = jwt.sign({ id: user.id.toString() }, config.jwt_secret);
+    const token = jwt.sign(
+        { id: user.id.toString() },
+        config.jwt_secret,
+        { expiresIn: config.jwt_expires_in }
+    );
     return { user: new UserResponse(user), token };
 };
 

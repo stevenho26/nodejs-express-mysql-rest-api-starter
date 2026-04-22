@@ -33,7 +33,11 @@ connectDB().then(async () => {
 // Handle Unhandled Rejections
 process.on('unhandledRejection', (err) => {
   logger.error('UNHANDLED REJECTION! 💥 Shutting down...', err);
-  server.close(() => {
-    process.exit(1);
-  });
+  if (server && server.close) {
+    server.close(() => {
+      process.exit(1);
+    });
+    return;
+  }
+  process.exit(1);
 });

@@ -14,7 +14,7 @@ const auth = async (req, res, next) => {
         req.token = token;
         req.user = user;
         next();
-    } catch (e) {
+    } catch {
         next(new ApiError(401, 'Please authenticate.'));
     }
 };
