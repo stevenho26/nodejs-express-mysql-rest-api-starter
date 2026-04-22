@@ -57,7 +57,7 @@ class ProtocolConfigModel {
       ]);
       return result;
     } catch (error) {
-      throw new Error(`Failed to create/update protocol config: ${error.message}`);
+      throw new Error(`Failed to create/update protocol config: ${error.message}`, { cause: error });
     }
   }
 
@@ -76,7 +76,7 @@ class ProtocolConfigModel {
       }
       return null;
     } catch (error) {
-      throw new Error(`Failed to get protocol config: ${error.message}`);
+      throw new Error(`Failed to get protocol config: ${error.message}`, { cause: error });
     }
   }
 
@@ -90,7 +90,7 @@ class ProtocolConfigModel {
       const [rows] = await pool.execute(query);
       return rows.map(row => this._formatConfig(row));
     } catch (error) {
-      throw new Error(`Failed to get all configs: ${error.message}`);
+      throw new Error(`Failed to get all configs: ${error.message}`, { cause: error });
     }
   }
 

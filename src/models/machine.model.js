@@ -24,7 +24,7 @@ class MachineModel {
       ]);
       return result;
     } catch (error) {
-      throw new Error(`Failed to create/update machine: ${error.message}`);
+      throw new Error(`Failed to create/update machine: ${error.message}`, { cause: error });
     }
   }
 
@@ -48,7 +48,7 @@ class MachineModel {
         protocols: typeof row.protocols === 'string' ? JSON.parse(row.protocols) : row.protocols
       }));
     } catch (error) {
-      throw new Error(`Failed to get machines: ${error.message}`);
+      throw new Error(`Failed to get machines: ${error.message}`, { cause: error });
     }
   }
 
@@ -69,7 +69,7 @@ class MachineModel {
       }
       return null;
     } catch (error) {
-      throw new Error(`Failed to get machine: ${error.message}`);
+      throw new Error(`Failed to get machine: ${error.message}`, { cause: error });
     }
   }
 
@@ -87,7 +87,7 @@ class MachineModel {
       const [result] = await pool.execute(query, [status, machineId]);
       return result;
     } catch (error) {
-      throw new Error(`Failed to update machine status: ${error.message}`);
+      throw new Error(`Failed to update machine status: ${error.message}`, { cause: error });
     }
   }
 
@@ -105,7 +105,7 @@ class MachineModel {
       const [result] = await pool.execute(query, [machineId]);
       return result;
     } catch (error) {
-      throw new Error(`Failed to update heartbeat: ${error.message}`);
+      throw new Error(`Failed to update heartbeat: ${error.message}`, { cause: error });
     }
   }
 
@@ -126,7 +126,7 @@ class MachineModel {
         protocols: typeof row.protocols === 'string' ? JSON.parse(row.protocols) : row.protocols
       }));
     } catch (error) {
-      throw new Error(`Failed to get active machines: ${error.message}`);
+      throw new Error(`Failed to get active machines: ${error.message}`, { cause: error });
     }
   }
 
@@ -150,7 +150,7 @@ class MachineModel {
       const [rows] = await pool.execute(query, [machineId]);
       return rows[0] || null;
     } catch (error) {
-      throw new Error(`Failed to get machine stats: ${error.message}`);
+      throw new Error(`Failed to get machine stats: ${error.message}`, { cause: error });
     }
   }
 }

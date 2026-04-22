@@ -103,7 +103,6 @@ async function setupDatabase() {
     // Parse command line arguments
     const args = process.argv.slice(2);
     const includeSeed = args.includes('--seed');
-    const forceSetup = args.includes('--force');
     
     logInfo(`Setup mode: ${includeSeed ? 'WITH SEED DATA' : 'WITHOUT SEED DATA'}`);
     
@@ -240,7 +239,7 @@ async function setupDatabase() {
       try {
         await connection.end();
         logInfo('Database connection closed');
-      } catch (e) {
+      } catch {
         // Ignore
       }
     }

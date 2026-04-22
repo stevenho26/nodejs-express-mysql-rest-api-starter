@@ -19,7 +19,7 @@ class RawDataModel {
       ]);
       return result;
     } catch (error) {
-      throw new Error(`Failed to insert raw data: ${error.message}`);
+      throw new Error(`Failed to insert raw data: ${error.message}`, { cause: error });
     }
   }
 
@@ -39,7 +39,7 @@ class RawDataModel {
       const [result] = await pool.execute(query, [errorMessage, errorCode, messageId]);
       return result;
     } catch (error) {
-      throw new Error(`Failed to mark data as invalid: ${error.message}`);
+      throw new Error(`Failed to mark data as invalid: ${error.message}`, { cause: error });
     }
   }
 
@@ -55,7 +55,7 @@ class RawDataModel {
       const [rows] = await pool.execute(query, [id]);
       return rows[0] || null;
     } catch (error) {
-      throw new Error(`Failed to get raw data: ${error.message}`);
+      throw new Error(`Failed to get raw data: ${error.message}`, { cause: error });
     }
   }
 
@@ -71,7 +71,7 @@ class RawDataModel {
       const [rows] = await pool.execute(query, [messageId]);
       return rows[0] || null;
     } catch (error) {
-      throw new Error(`Failed to get raw data: ${error.message}`);
+      throw new Error(`Failed to get raw data: ${error.message}`, { cause: error });
     }
   }
 
@@ -90,7 +90,7 @@ class RawDataModel {
       const [rows] = await pool.execute(query, [machineId, limit, offset]);
       return rows;
     } catch (error) {
-      throw new Error(`Failed to get recent data: ${error.message}`);
+      throw new Error(`Failed to get recent data: ${error.message}`, { cause: error });
     }
   }
 
@@ -116,7 +116,7 @@ class RawDataModel {
       const [rows] = await pool.execute(query, [machineId]);
       return rows[0] || null;
     } catch (error) {
-      throw new Error(`Failed to get data quality report: ${error.message}`);
+      throw new Error(`Failed to get data quality report: ${error.message}`, { cause: error });
     }
   }
 }

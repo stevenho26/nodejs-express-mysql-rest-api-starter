@@ -53,7 +53,7 @@ async function setupDatabase() {
     
     // Execute SQL script
     logger.info('⏳ Executing SQL script...');
-    const results = await connection.query(sqlScript);
+    await connection.query(sqlScript);
     
     logger.info('✅ Database setup completed successfully!');
     logger.info(`📊 Tables created in database: ${config.database}`);

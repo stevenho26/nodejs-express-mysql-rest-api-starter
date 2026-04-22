@@ -5,5 +5,3 @@ process.env.DB_NAME = process.env.DB_NAME || 'testdb';
 process.env.DB_USER = process.env.DB_USER || 'test';
 process.env.DB_PASSWORD = process.env.DB_PASSWORD || 'test';
 process.env.DB_HOST = process.env.DB_HOST || 'localhost';
-process.env.JWT_SECRET = process.env.JWT_SECRET || 'test_jwt_secret';
-process.env.JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1h';

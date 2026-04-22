@@ -193,6 +193,39 @@ class MDataController {
   }
 
   /**
+   * GET /api/mdata/protocol-config/:machineId - Get protocol config for a machine
+   */
+  static async getProtocolConfig(req, res) {
+    try {
+      const { machineId } = req.params;
+
+      logger.info(`Fetching protocol config for machine: ${machineId}`);
+
+      const ProtocolConfigModel = require('../models/protocolconfig.model');
+
+      const config = await ProtocolConfigModel.getConfigByMachineId(machineId);
+
+      if (!config) {
+        return res.status(404).json({
+          success: false,
+          message: `No protocol config found for machine ${machineId}`
+        });
+      }
+
+      res.status(200).json({
+        success: true,
+        data: config
+      });
+    } catch (error) {
+      logger.error(`Error fetching protocol config: ${error.message}`);
+      res.status(500).json({
+        success: false,
+        message: error.message
+      });
+    }
+  }
+
+  /**
    * POST /api/mdata/heartbeat - Record heartbeat from middleware
    */
   static async recordHeartbeat(req, res) {

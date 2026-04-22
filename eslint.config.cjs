@@ -5,6 +5,7 @@ const commonJsGlobals = {
   require: 'readonly',
   process: 'readonly',
   __dirname: 'readonly',
+  console: 'readonly',
 };
 
 module.exports = [

@@ -93,7 +93,7 @@ class MDataService {
         message: 'Raw data processed successfully'
       };
     } catch (error) {
-      throw new Error(`Error processing raw data: ${error.message}`);
+      throw new Error(`Error processing raw data: ${error.message}`, { cause: error });
     }
   }
 
@@ -118,13 +118,13 @@ class MDataService {
         is_online: this._isOnline(machine.last_heartbeat),
         time_since_heartbeat: this._getTimeSinceHeartbeat(machine.last_heartbeat)
       }));
-    } catch (error) {
-      throw new Error(`Failed to get machines: ${error.message}`);
+} catch (error) {
+      throw new Error(`Failed to get machines: ${error.message}`, { cause: error });
     }
   }
 
   /**
-   * Check if machine is online (heartbeat within last 5 minutes)
+   * Check if machine is online
    */
   static _isOnline(lastHeartbeat) {
     if (!lastHeartbeat) return false;
@@ -176,7 +176,7 @@ class MDataService {
         message: 'Machine created/updated successfully'
       };
     } catch (error) {
-      throw new Error(`Failed to create/update machine: ${error.message}`);
+      throw new Error(`Failed to create/update machine: ${error.message}`, { cause: error });
     }
   }
 
@@ -200,7 +200,7 @@ class MDataService {
         message: 'Configuration updated successfully'
       };
     } catch (error) {
-      throw new Error(`Failed to update configuration: ${error.message}`);
+      throw new Error(`Failed to update configuration: ${error.message}`, { cause: error });
     }
   }
 
@@ -223,7 +223,7 @@ class MDataService {
         message: 'Heartbeat recorded successfully'
       };
     } catch (error) {
-      throw new Error(`Failed to record heartbeat: ${error.message}`);
+      throw new Error(`Failed to record heartbeat: ${error.message}`, { cause: error });
     }
   }
 
