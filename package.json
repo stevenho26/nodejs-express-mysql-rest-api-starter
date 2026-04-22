@@ -5,7 +5,10 @@
   "scripts": {
     "test": "jest --runInBand",
     "start": "nodemon src/server.js",
-    "lint": "eslint src --ext .js"
+    "lint": "eslint src --ext .js",
+    "create-db": "node src/scripts/setup-db.js",
+    "verify-db": "node src/scripts/verify-db.js",
+    "dev": "npm start"
   },
   "keywords": [],
   "author": "",
