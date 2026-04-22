@@ -1,299 +1,273 @@
 -- ============================================
 -- MData API - Lab Data Collection System
--- Database Setup Script (PHASE 1) - For Existing acca_mdata
+-- Clean up and create tables in acca_mdata
 -- ============================================
--- Version: 2.0
--- Date: 2026-04-22
--- Description: Add raw data collection tables to existing acca_mdata database
--- NOTE: This script uses the existing acca_mdata database
 
--- ============================================
--- 1. USE EXISTING DATABASE
--- ============================================
 USE `acca_mdata`;
 
+-- Drop existing tables if they exist
+DROP TABLE IF EXISTS `tbl_data_transformation_log`;
+DROP TABLE IF EXISTS `tbl_middleware_cache`;
+DROP TABLE IF EXISTS `tbl_protocol_config`;
+DROP TABLE IF EXISTS `tbl_message_dedup`;
+DROP TABLE IF EXISTS `tbl_sync_log`;
+DROP TABLE IF EXISTS `tbl_error_log`;
+DROP TABLE IF EXISTS `tbl_raw_data`;
+DROP TABLE IF EXISTS `tbl_machines`;
+
+-- Drop views if they exist
+DROP VIEW IF EXISTS `v_active_machines_summary`;
+DROP VIEW IF EXISTS `v_error_summary_7days`;
+DROP VIEW IF EXISTS `v_data_quality_report`;
+
+-- Drop procedures if they exist
+DROP PROCEDURE IF EXISTS `sp_get_partition_sizes`;
+DROP PROCEDURE IF EXISTS `sp_cleanup_old_dedup_entries`;
+DROP PROCEDURE IF EXISTS `sp_generate_health_report`;
+
+-- Drop triggers if they exist
+DROP TRIGGER IF EXISTS `trg_update_machine_record_count`;
+DROP TRIGGER IF EXISTS `trg_update_machine_error_count`;
+DROP TRIGGER IF EXISTS `trg_track_duplicate`;
+
 -- ============================================
--- 2. CREATE MACHINES TABLE (Machine Configuration)
+-- 1. CREATE MACHINES TABLE
 -- ============================================
-CREATE TABLE IF NOT EXISTS `tbl_machines` (
-  `id` INT AUTO_INCREMENT PRIMARY KEY COMMENT 'Primary Key',
-  `machine_id` VARCHAR(50) NOT NULL UNIQUE COMMENT 'Unique identifier from config',
-  `name` VARCHAR(100) NOT NULL COMMENT 'Machine name/label',
-  `location` VARCHAR(100) COMMENT 'Physical location in lab',
-  `device_type` VARCHAR(50) NOT NULL COMMENT 'Device type: Analyzer, Centrifuge, etc.',
-  `description` TEXT COMMENT 'Machine description',
+CREATE TABLE `tbl_machines` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `machine_id` VARCHAR(50) NOT NULL UNIQUE,
+  `name` VARCHAR(100) NOT NULL,
+  `location` VARCHAR(100),
+  `device_type` VARCHAR(50) NOT NULL,
+  `description` TEXT,
   
-  -- Connection Configuration
-  `protocols` JSON NOT NULL COMMENT 'Supported protocols config (RS232, LAN, FILE)',
-  `status` ENUM('ACTIVE', 'INACTIVE', 'ERROR', 'MAINTENANCE') DEFAULT 'ACTIVE' COMMENT 'Machine status',
+  `protocols` JSON NOT NULL,
+  `status` ENUM('ACTIVE', 'INACTIVE', 'ERROR', 'MAINTENANCE') DEFAULT 'ACTIVE',
   
-  -- Last Activity
-  `last_sync` TIMESTAMP NULL COMMENT 'Last successful sync time',
-  `last_heartbeat` TIMESTAMP NULL COMMENT 'Last heartbeat from middleware',
-  `total_records_sent` BIGINT DEFAULT 0 COMMENT 'Total records sent from this machine',
-  `total_errors` INT DEFAULT 0 COMMENT 'Total errors encountered',
+  `last_sync` TIMESTAMP NULL,
+  `last_heartbeat` TIMESTAMP NULL,
+  `total_records_sent` BIGINT DEFAULT 0,
+  `total_errors` INT DEFAULT 0,
   
-  -- Metadata
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   
-  -- Indexes
   UNIQUE KEY `uk_machine_id` (`machine_id`),
   KEY `idx_status` (`status`),
   KEY `idx_device_type` (`device_type`),
   KEY `idx_last_sync` (`last_sync`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Machine configuration and metadata';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
--- 3. CREATE RAW_DATA TABLE (Partitioned by Quarter)
+-- 2. CREATE RAW_DATA TABLE
 -- ============================================
-CREATE TABLE IF NOT EXISTS `tbl_raw_data` (
-  `id` BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'Primary Key',
-  `machine_id` VARCHAR(50) NOT NULL COMMENT 'Foreign key to machines.machine_id',
-  `message_id` VARCHAR(100) NOT NULL COMMENT 'Unique message identifier (UUID)',
-  `protocol` VARCHAR(20) NOT NULL COMMENT 'Protocol used: RS232, LAN, FILE',
+CREATE TABLE `tbl_raw_data` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `machine_id` VARCHAR(50) NOT NULL,
+  `message_id` VARCHAR(100) NOT NULL,
+  `protocol` VARCHAR(20) NOT NULL,
   
-  -- Raw Data Storage
-  `raw_payload` LONGTEXT NOT NULL COMMENT 'Complete raw data as received (JSON format)',
-  `raw_payload_hash` VARCHAR(64) COMMENT 'SHA256 hash for deduplication check',
+  `raw_payload` LONGTEXT NOT NULL,
+  `raw_payload_hash` VARCHAR(64),
   
-  -- Validation & Error Handling
-  `is_valid` BOOLEAN DEFAULT TRUE COMMENT 'Data validation status',
-  `validation_error` VARCHAR(500) COMMENT 'Error message if validation failed',
-  `error_code` VARCHAR(20) COMMENT 'Error code for categorization',
+  `is_valid` BOOLEAN DEFAULT TRUE,
+  `validation_error` VARCHAR(500),
+  `error_code` VARCHAR(20),
   
-  -- Metadata
-  `received_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'When data was received by API',
-  `middleware_timestamp` TIMESTAMP NULL COMMENT 'When data was captured by middleware',
-  `partition_key` VARCHAR(20) NOT NULL COMMENT 'Partition identifier (2024_Q1, 2024_Q2, etc.)',
-  `batch_id` VARCHAR(100) COMMENT 'Batch identifier for correlation',
+  `received_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `middleware_timestamp` TIMESTAMP NULL,
+  `partition_key` VARCHAR(20) NOT NULL,
+  `batch_id` VARCHAR(100),
   
-  -- Indexes
   UNIQUE KEY `uk_message_id` (`message_id`),
   KEY `idx_machine_id` (`machine_id`),
   KEY `idx_received_at` (`received_at`),
   KEY `idx_partition_key` (`partition_key`),
   KEY `idx_is_valid` (`is_valid`),
   KEY `idx_protocol` (`protocol`),
+  KEY `idx_composite_machine_received` (`machine_id`, `received_at` DESC),
+  KEY `idx_composite_partition_valid` (`partition_key`, `is_valid`),
   FOREIGN KEY `fk_machine_id` (`machine_id`) REFERENCES `tbl_machines` (`machine_id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Raw data collection table (partitioned by quarter)'
-
--- Add Partitions (Quarters)
-PARTITION BY LIST COLUMNS (partition_key) (
-  PARTITION p2024_q1 VALUES IN ('2024_Q1') COMMENT='Q1 2024',
-  PARTITION p2024_q2 VALUES IN ('2024_Q2') COMMENT='Q2 2024',
-  PARTITION p2024_q3 VALUES IN ('2024_Q3') COMMENT='Q3 2024',
-  PARTITION p2024_q4 VALUES IN ('2024_Q4') COMMENT='Q4 2024',
-  PARTITION p2025_q1 VALUES IN ('2025_Q1') COMMENT='Q1 2025',
-  PARTITION p2025_q2 VALUES IN ('2025_Q2') COMMENT='Q2 2025',
-  PARTITION p2025_q3 VALUES IN ('2025_Q3') COMMENT='Q3 2025',
-  PARTITION p2025_q4 VALUES IN ('2025_Q4') COMMENT='Q4 2025',
-  PARTITION p2026_q1 VALUES IN ('2026_Q1') COMMENT='Q1 2026',
-  PARTITION p2026_q2 VALUES IN ('2026_Q2') COMMENT='Q2 2026',
-  PARTITION pdefault VALUES IN (DEFAULT) COMMENT='Default partition for undefined quarters'
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
--- 4. CREATE ERROR_LOG TABLE
+-- 3. CREATE ERROR_LOG TABLE
 -- ============================================
-CREATE TABLE IF NOT EXISTS `tbl_error_log` (
-  `id` INT AUTO_INCREMENT PRIMARY KEY COMMENT 'Primary Key',
-  `machine_id` VARCHAR(50) NOT NULL COMMENT 'Foreign key to tbl_machines.machine_id',
-  `error_code` VARCHAR(20) NOT NULL COMMENT 'Error code for categorization',
-  `error_message` TEXT NOT NULL COMMENT 'Detailed error message',
-  `error_details` JSON COMMENT 'Additional error context (stack trace, etc.)',
-  `severity` ENUM('INFO', 'WARNING', 'ERROR', 'CRITICAL') DEFAULT 'ERROR' COMMENT 'Error severity level',
+CREATE TABLE `tbl_error_log` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `machine_id` VARCHAR(50) NOT NULL,
+  `error_code` VARCHAR(20) NOT NULL,
+  `error_message` TEXT NOT NULL,
+  `error_details` JSON,
+  `severity` ENUM('INFO', 'WARNING', 'ERROR', 'CRITICAL') DEFAULT 'ERROR',
   
-  -- Status
-  `resolved` BOOLEAN DEFAULT FALSE COMMENT 'Whether error has been resolved',
-  `resolved_at` TIMESTAMP NULL COMMENT 'When error was resolved',
-  `resolution_note` TEXT COMMENT 'Resolution details',
+  `resolved` BOOLEAN DEFAULT FALSE,
+  `resolved_at` TIMESTAMP NULL,
+  `resolution_note` TEXT,
   
-  -- Timestamps
-  `error_timestamp` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'When error occurred',
+  `error_timestamp` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   
-  -- Indexes
   KEY `idx_machine_id` (`machine_id`),
   KEY `idx_error_code` (`error_code`),
   KEY `idx_error_timestamp` (`error_timestamp`),
   KEY `idx_resolved` (`resolved`),
   KEY `idx_severity` (`severity`),
-  FOREIGN KEY `fk_machine_id` (`machine_id`) REFERENCES `tbl_machines` (`machine_id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Error and alert log from middleware';
+  KEY `idx_composite_machine_severity` (`machine_id`, `severity`, `error_timestamp` DESC),
+  FOREIGN KEY `fk_machine_id_error` (`machine_id`) REFERENCES `tbl_machines` (`machine_id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
--- 5. CREATE SYNC_LOG TABLE
+-- 4. CREATE SYNC_LOG TABLE
 -- ============================================
-CREATE TABLE IF NOT EXISTS `tbl_sync_log` (
-  `id` INT AUTO_INCREMENT PRIMARY KEY COMMENT 'Primary Key',
-  `machine_id` VARCHAR(50) NOT NULL COMMENT 'Foreign key to tbl_machines.machine_id',
+CREATE TABLE `tbl_sync_log` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `machine_id` VARCHAR(50) NOT NULL,
   
-  -- Sync Details
-  `batch_id` VARCHAR(100) UNIQUE COMMENT 'Unique batch identifier',
-  `batch_count` INT NOT NULL COMMENT 'Total records in batch',
-  `success_count` INT NOT NULL COMMENT 'Successfully processed records',
-  `failed_count` INT DEFAULT 0 COMMENT 'Failed records',
-  `duplicate_count` INT DEFAULT 0 COMMENT 'Duplicate records detected',
+  `batch_id` VARCHAR(100) UNIQUE,
+  `batch_count` INT NOT NULL,
+  `success_count` INT NOT NULL,
+  `failed_count` INT DEFAULT 0,
+  `duplicate_count` INT DEFAULT 0,
   
-  -- Performance Metrics
-  `duration_ms` INT COMMENT 'Sync duration in milliseconds',
-  `data_size_bytes` BIGINT COMMENT 'Total data size in bytes',
+  `duration_ms` INT,
+  `data_size_bytes` BIGINT,
   
-  -- Status
-  `status` ENUM('SUCCESS', 'PARTIAL', 'FAILED') NOT NULL COMMENT 'Overall sync status',
-  `error_message` TEXT COMMENT 'Error message if failed',
+  `status` ENUM('SUCCESS', 'PARTIAL', 'FAILED') NOT NULL,
+  `error_message` TEXT,
   
-  -- Timestamps
-  `sync_timestamp` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'When sync occurred',
-  `completed_at` TIMESTAMP NULL COMMENT 'When sync completed',
+  `sync_timestamp` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `completed_at` TIMESTAMP NULL,
   
-  -- Indexes
   KEY `idx_machine_id` (`machine_id`),
   KEY `idx_sync_timestamp` (`sync_timestamp`),
   KEY `idx_status` (`status`),
-  FOREIGN KEY `fk_machine_id` (`machine_id`) REFERENCES `tbl_machines` (`machine_id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Sync event log for tracking data transfers';
+  KEY `idx_composite_machine_status` (`machine_id`, `status`, `sync_timestamp` DESC),
+  FOREIGN KEY `fk_machine_id_sync` (`machine_id`) REFERENCES `tbl_machines` (`machine_id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
--- 6. CREATE MESSAGE_DEDUP TABLE
+-- 5. CREATE MESSAGE_DEDUP TABLE
 -- ============================================
-CREATE TABLE IF NOT EXISTS `tbl_message_dedup` (
-  `id` INT AUTO_INCREMENT PRIMARY KEY COMMENT 'Primary Key',
-  `machine_id` VARCHAR(50) NOT NULL COMMENT 'Foreign key to tbl_machines.machine_id',
-  `message_id` VARCHAR(100) NOT NULL COMMENT 'Message identifier for deduplication',
-  `data_hash` VARCHAR(64) NOT NULL COMMENT 'SHA256 hash of payload',
+CREATE TABLE `tbl_message_dedup` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `machine_id` VARCHAR(50) NOT NULL,
+  `message_id` VARCHAR(100) NOT NULL,
+  `data_hash` VARCHAR(64) NOT NULL,
   
-  -- Tracking
-  `first_received_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'First time received',
-  `duplicate_count` INT DEFAULT 0 COMMENT 'Number of duplicates detected',
-  `last_duplicate_at` TIMESTAMP NULL COMMENT 'Last time duplicate was detected',
+  `first_received_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `duplicate_count` INT DEFAULT 0,
+  `last_duplicate_at` TIMESTAMP NULL,
   
-  -- Cleanup
-  `archived` BOOLEAN DEFAULT FALSE COMMENT 'Whether marked for archival',
+  `archived` BOOLEAN DEFAULT FALSE,
   `archived_at` TIMESTAMP NULL,
   
-  -- Indexes
   UNIQUE KEY `uk_message_id` (`message_id`),
   KEY `idx_machine_id` (`machine_id`),
   KEY `idx_first_received_at` (`first_received_at`),
   KEY `idx_archived` (`archived`),
-  FOREIGN KEY `fk_machine_id` (`machine_id`) REFERENCES `tbl_machines` (`machine_id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Message deduplication tracking table';
+  FOREIGN KEY `fk_machine_id_dedup` (`machine_id`) REFERENCES `tbl_machines` (`machine_id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
--- 7. CREATE PROTOCOL_CONFIG TABLE
+-- 6. CREATE PROTOCOL_CONFIG TABLE
 -- ============================================
-CREATE TABLE IF NOT EXISTS `tbl_protocol_config` (
+CREATE TABLE `tbl_protocol_config` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `machine_id` VARCHAR(50) NOT NULL UNIQUE,
   
-  -- RS232 Configuration
   `rs232_enabled` BOOLEAN DEFAULT FALSE,
-  `rs232_port` VARCHAR(20) COMMENT 'COM port: COM1, COM2, etc.',
-  `rs232_baudrate` INT DEFAULT 9600 COMMENT 'Baud rate: 9600, 19200, 115200, etc.',
+  `rs232_port` VARCHAR(20),
+  `rs232_baudrate` INT DEFAULT 9600,
   `rs232_databits` INT DEFAULT 8,
   `rs232_stopbits` INT DEFAULT 1,
-  `rs232_parity` VARCHAR(10) DEFAULT 'NONE' COMMENT 'NONE, ODD, EVEN',
-  `rs232_handshake` VARCHAR(10) DEFAULT 'NONE' COMMENT 'NONE, XON_XOFF, RTS_CTS',
+  `rs232_parity` VARCHAR(10) DEFAULT 'NONE',
+  `rs232_handshake` VARCHAR(10) DEFAULT 'NONE',
   
-  -- LAN/TCP Configuration
   `lan_enabled` BOOLEAN DEFAULT FALSE,
-  `lan_host` VARCHAR(50) COMMENT 'IP address or hostname',
-  `lan_port` INT DEFAULT 502 COMMENT 'Port number (typically 502 for Modbus TCP)',
+  `lan_host` VARCHAR(50),
+  `lan_port` INT DEFAULT 502,
   `lan_timeout_ms` INT DEFAULT 5000,
   `lan_retry_count` INT DEFAULT 3,
   
-  -- File Watcher Configuration
   `file_enabled` BOOLEAN DEFAULT FALSE,
-  `file_watch_path` VARCHAR(500) COMMENT 'Directory path to monitor',
-  `file_pattern` VARCHAR(100) DEFAULT '*.csv' COMMENT 'File pattern to watch: *.csv, *.xlsx, etc.',
+  `file_watch_path` VARCHAR(500),
+  `file_pattern` VARCHAR(100) DEFAULT '*.csv',
   `file_encoding` VARCHAR(20) DEFAULT 'UTF-8',
   
-  -- Validation Configuration
   `checksum_enabled` BOOLEAN DEFAULT TRUE,
-  `checksum_type` VARCHAR(20) DEFAULT 'CUSTOM' COMMENT 'Custom terminator or CRC16',
-  `terminator_char` VARCHAR(10) DEFAULT '\\r\\n' COMMENT 'String terminator',
-  `max_payload_size` INT DEFAULT 65536 COMMENT 'Maximum payload size in bytes',
+  `checksum_type` VARCHAR(20) DEFAULT 'CUSTOM',
+  `terminator_char` VARCHAR(10) DEFAULT '\r\n',
+  `max_payload_size` INT DEFAULT 65536,
   
-  -- Sync Configuration
-  `sync_interval_ms` INT DEFAULT 30000 COMMENT 'Sync interval in milliseconds',
-  `batch_size` INT DEFAULT 500 COMMENT 'Number of records per batch',
+  `sync_interval_ms` INT DEFAULT 30000,
+  `batch_size` INT DEFAULT 500,
   `cache_flush_on_sync` BOOLEAN DEFAULT TRUE,
   
-  -- Metadata
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   
-  FOREIGN KEY `fk_machine_id` (`machine_id`) REFERENCES `tbl_machines` (`machine_id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Protocol-specific configuration for each machine';
+  FOREIGN KEY `fk_machine_id_config` (`machine_id`) REFERENCES `tbl_machines` (`machine_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
--- 8. CREATE MIDDLEWARE_CACHE TABLE
+-- 7. CREATE MIDDLEWARE_CACHE TABLE
 -- ============================================
-CREATE TABLE IF NOT EXISTS `tbl_middleware_cache` (
+CREATE TABLE `tbl_middleware_cache` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `machine_id` VARCHAR(50) NOT NULL UNIQUE,
   
-  -- Cache Status
-  `cache_size_bytes` BIGINT DEFAULT 0 COMMENT 'Current cache size',
-  `pending_count` INT DEFAULT 0 COMMENT 'Number of pending items',
-  `last_sync_attempt` TIMESTAMP NULL COMMENT 'Last attempt to sync',
-  `last_sync_success` TIMESTAMP NULL COMMENT 'Last successful sync',
+  `cache_size_bytes` BIGINT DEFAULT 0,
+  `pending_count` INT DEFAULT 0,
+  `last_sync_attempt` TIMESTAMP NULL,
+  `last_sync_success` TIMESTAMP NULL,
   
-  -- Cache Health
-  `cache_utilization_percent` DECIMAL(5, 2) DEFAULT 0 COMMENT 'Cache utilization percentage',
+  `cache_utilization_percent` DECIMAL(5, 2) DEFAULT 0,
   `is_healthy` BOOLEAN DEFAULT TRUE,
   `health_check_timestamp` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   
-  -- Middleware Status
   `middleware_version` VARCHAR(20),
   `middleware_last_seen` TIMESTAMP NULL,
   `middleware_status` ENUM('RUNNING', 'STOPPED', 'ERROR', 'UNKNOWN') DEFAULT 'UNKNOWN',
   
   KEY `idx_machine_id` (`machine_id`),
   KEY `idx_is_healthy` (`is_healthy`),
-  FOREIGN KEY `fk_machine_id` (`machine_id`) REFERENCES `tbl_machines` (`machine_id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Middleware cache and health status tracking';
+  FOREIGN KEY `fk_machine_id_cache` (`machine_id`) REFERENCES `tbl_machines` (`machine_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
--- 9. CREATE DATA_TRANSFORMATION_LOG TABLE
+-- 8. CREATE DATA_TRANSFORMATION_LOG TABLE
 -- ============================================
-CREATE TABLE IF NOT EXISTS `tbl_data_transformation_log` (
+CREATE TABLE `tbl_data_transformation_log` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `raw_data_id` BIGINT NOT NULL,
   `machine_id` VARCHAR(50) NOT NULL,
   
-  -- Transformation Process
   `transformation_status` ENUM('PENDING', 'IN_PROGRESS', 'SUCCESS', 'FAILED') DEFAULT 'PENDING',
-  `transformation_error` TEXT COMMENT 'Error message if failed',
+  `transformation_error` TEXT,
   
-  -- Extracted Data (for reference)
-  `extracted_values` JSON COMMENT 'Extracted key-value pairs',
-  `normalization_applied` TEXT COMMENT 'Applied normalization rules',
+  `extracted_values` JSON,
+  `normalization_applied` TEXT,
   
-  -- Tracking
   `started_at` TIMESTAMP NULL,
   `completed_at` TIMESTAMP NULL,
-  `duration_ms` INT COMMENT 'Processing duration',
+  `duration_ms` INT,
   
-  -- Metadata
-  `worker_id` VARCHAR(50) COMMENT 'Which worker processed this',
+  `worker_id` VARCHAR(50),
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   
   KEY `idx_machine_id` (`machine_id`),
   KEY `idx_transformation_status` (`transformation_status`),
   KEY `idx_raw_data_id` (`raw_data_id`),
   FOREIGN KEY `fk_raw_data_id` (`raw_data_id`) REFERENCES `tbl_raw_data` (`id`) ON DELETE CASCADE,
-  FOREIGN KEY `fk_machine_id` (`machine_id`) REFERENCES `tbl_machines` (`machine_id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Data transformation processing log (Phase 2 preparation)';
+  FOREIGN KEY `fk_machine_id_transform` (`machine_id`) REFERENCES `tbl_machines` (`machine_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
--- 10. CREATE VIEWS
+-- 9. CREATE VIEWS
 -- ============================================
 
--- View: Active Machines Summary
-CREATE OR REPLACE VIEW `v_active_machines_summary` AS
+CREATE VIEW `v_active_machines_summary` AS
 SELECT 
   m.machine_id,
   m.name,
@@ -303,7 +277,6 @@ SELECT
   m.last_heartbeat,
   m.total_records_sent,
   m.total_errors,
-  TIMEDIFF(NOW(), m.last_heartbeat) AS time_since_heartbeat,
   mc.pending_count,
   mc.cache_size_bytes,
   mc.middleware_status,
@@ -313,8 +286,7 @@ LEFT JOIN tbl_middleware_cache mc ON m.machine_id = mc.machine_id
 WHERE m.status = 'ACTIVE'
 ORDER BY m.last_heartbeat DESC;
 
--- View: Error Summary Last 7 Days
-CREATE OR REPLACE VIEW `v_error_summary_7days` AS
+CREATE VIEW `v_error_summary_7days` AS
 SELECT 
   machine_id,
   error_code,
@@ -327,8 +299,7 @@ WHERE error_timestamp > DATE_SUB(NOW(), INTERVAL 7 DAY)
 GROUP BY machine_id, error_code, severity
 ORDER BY error_count DESC;
 
--- View: Data Quality Report
-CREATE OR REPLACE VIEW `v_data_quality_report` AS
+CREATE VIEW `v_data_quality_report` AS
 SELECT 
   machine_id,
   COUNT(*) AS total_records,
@@ -344,43 +315,24 @@ GROUP BY machine_id
 ORDER BY valid_percentage ASC;
 
 -- ============================================
--- 11. CREATE INDEXES FOR OPTIMIZATION
+-- 10. CREATE STORED PROCEDURES
 -- ============================================
 
--- Composite indexes for common queries
-ALTER TABLE tbl_raw_data ADD INDEX idx_composite_machine_received 
-  (machine_id, received_at DESC);
-ALTER TABLE tbl_raw_data ADD INDEX idx_composite_partition_valid 
-  (partition_key, is_valid);
-ALTER TABLE tbl_error_log ADD INDEX idx_composite_machine_severity 
-  (machine_id, severity, error_timestamp DESC);
-ALTER TABLE tbl_sync_log ADD INDEX idx_composite_machine_status 
-  (machine_id, status, sync_timestamp DESC);
-
--- ============================================
--- 12. CREATE STORED PROCEDURES
--- ============================================
-
--- Procedure: Get partition size (for monitoring)
 DELIMITER //
-CREATE PROCEDURE sp_get_partition_sizes()
+CREATE PROCEDURE `sp_get_partition_sizes`()
 BEGIN
   SELECT 
-    partition_name,
-    ROUND(data_length / 1024 / 1024, 2) AS size_mb,
-    partition_expression,
-    partition_method
-  FROM information_schema.partitions
+    'tbl_raw_data' as table_name,
+    COUNT(*) as row_count,
+    ROUND(((data_length + index_length) / 1024 / 1024), 2) AS size_mb
+  FROM information_schema.tables
   WHERE table_schema = 'acca_mdata' 
-    AND table_name = 'tbl_raw_data'
-    AND partition_name IS NOT NULL
-  ORDER BY data_length DESC;
+    AND table_name = 'tbl_raw_data';
 END //
 DELIMITER ;
 
--- Procedure: Cleanup old message dedup entries
 DELIMITER //
-CREATE PROCEDURE sp_cleanup_old_dedup_entries(IN days_old INT)
+CREATE PROCEDURE `sp_cleanup_old_dedup_entries`(IN days_old INT)
 BEGIN
   UPDATE tbl_message_dedup 
   SET archived = TRUE, archived_at = NOW()
@@ -391,27 +343,24 @@ BEGIN
 END //
 DELIMITER ;
 
--- Procedure: Generate daily health report
 DELIMITER //
-CREATE PROCEDURE sp_generate_health_report()
+CREATE PROCEDURE `sp_generate_health_report`()
 BEGIN
   SELECT 
     DATE(NOW()) AS report_date,
     COUNT(DISTINCT m.machine_id) AS active_machines,
     (SELECT COUNT(*) FROM tbl_raw_data WHERE received_at > DATE_SUB(NOW(), INTERVAL 1 DAY)) AS records_today,
-    (SELECT COUNT(*) FROM tbl_error_log WHERE error_timestamp > DATE_SUB(NOW(), INTERVAL 1 DAY) AND resolved = FALSE) AS unresolved_errors,
-    (SELECT AVG(success_count / batch_count * 100) FROM tbl_sync_log WHERE sync_timestamp > DATE_SUB(NOW(), INTERVAL 1 DAY)) AS avg_sync_success_rate
+    (SELECT COUNT(*) FROM tbl_error_log WHERE error_timestamp > DATE_SUB(NOW(), INTERVAL 1 DAY) AND resolved = FALSE) AS unresolved_errors
   FROM tbl_machines m;
 END //
 DELIMITER ;
 
 -- ============================================
--- 13. CREATE TRIGGERS
+-- 11. CREATE TRIGGERS
 -- ============================================
 
--- Trigger: Update machines total_records_sent when new raw_data inserted
 DELIMITER //
-CREATE TRIGGER trg_update_machine_record_count
+CREATE TRIGGER `trg_update_machine_record_count`
 AFTER INSERT ON tbl_raw_data
 FOR EACH ROW
 BEGIN
@@ -422,9 +371,8 @@ BEGIN
 END //
 DELIMITER ;
 
--- Trigger: Update machines total_errors when error logged
 DELIMITER //
-CREATE TRIGGER trg_update_machine_error_count
+CREATE TRIGGER `trg_update_machine_error_count`
 AFTER INSERT ON tbl_error_log
 FOR EACH ROW
 BEGIN
@@ -434,9 +382,8 @@ BEGIN
 END //
 DELIMITER ;
 
--- Trigger: Track deduplication
 DELIMITER //
-CREATE TRIGGER trg_track_duplicate
+CREATE TRIGGER `trg_track_duplicate`
 BEFORE INSERT ON tbl_raw_data
 FOR EACH ROW
 BEGIN
@@ -459,23 +406,8 @@ END //
 DELIMITER ;
 
 -- ============================================
--- 14. FINAL VERIFICATION
+-- VERIFICATION
 -- ============================================
 
-SELECT '✅ Tables created in acca_mdata database:' AS info;
-SHOW TABLES;
-
-SELECT '✅ Partitions info:' AS info;
-SELECT 
-  partition_name, 
-  partition_expression,
-  ROUND(data_length / 1024 / 1024, 2) AS 'Size (MB)'
-FROM information_schema.partitions
-WHERE table_schema = 'acca_mdata' 
-  AND table_name = 'tbl_raw_data'
-  AND partition_name IS NOT NULL
-ORDER BY partition_name;
-
--- ============================================
--- END OF SCRIPT
--- ============================================
+SELECT '✅ All tables created successfully!' AS status;
+SHOW TABLES LIKE 'tbl_%';
